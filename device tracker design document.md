@@ -2,22 +2,24 @@
 
 ## Table of Contents
 
-1. [Project Overview](https://claude.ai/chat/781a6eae-05a1-4ee0-a426-69667f3b8b96#1-project-overview)
-2. [Tech Stack](https://claude.ai/chat/781a6eae-05a1-4ee0-a426-69667f3b8b96#2-tech-stack)
-3. [Architecture Overview](https://claude.ai/chat/781a6eae-05a1-4ee0-a426-69667f3b8b96#3-architecture-overview)
-4. [Project Structure](https://claude.ai/chat/781a6eae-05a1-4ee0-a426-69667f3b8b96#4-project-structure)
-5. [TypeScript Types](https://claude.ai/chat/781a6eae-05a1-4ee0-a426-69667f3b8b96#5-typescript-types)
-6. [Configuration](https://claude.ai/chat/781a6eae-05a1-4ee0-a426-69667f3b8b96#6-configuration)
-7. [Authentication Flow](https://claude.ai/chat/781a6eae-05a1-4ee0-a426-69667f3b8b96#7-authentication-flow)
-8. [Frontend — Pages](https://claude.ai/chat/781a6eae-05a1-4ee0-a426-69667f3b8b96#8-frontend--pages)
-9. [Frontend — Components](https://claude.ai/chat/781a6eae-05a1-4ee0-a426-69667f3b8b96#9-frontend--components)
-10. [Frontend — Hooks](https://claude.ai/chat/781a6eae-05a1-4ee0-a426-69667f3b8b96#10-frontend--hooks)
-11. [Frontend — Services](https://claude.ai/chat/781a6eae-05a1-4ee0-a426-69667f3b8b96#11-frontend--services)
-12. [Backend — Google Apps Script](https://claude.ai/chat/781a6eae-05a1-4ee0-a426-69667f3b8b96#12-backend--google-apps-script)
-13. [Google Sheets Data Structure](https://claude.ai/chat/781a6eae-05a1-4ee0-a426-69667f3b8b96#13-google-sheets-data-structure)
-14. [API Contract](https://claude.ai/chat/781a6eae-05a1-4ee0-a426-69667f3b8b96#14-api-contract)
-15. [Page Flow and Navigation](https://claude.ai/chat/781a6eae-05a1-4ee0-a426-69667f3b8b96#15-page-flow-and-navigation)
-16. [Key Implementation Notes](https://claude.ai/chat/781a6eae-05a1-4ee0-a426-69667f3b8b96#16-key-implementation-notes)
+1. Project Overview
+2. Tech Stack
+3. Architecture Overview
+4. Project Structure
+5. TypeScript Types
+6. Configuration
+7. Authentication Flow
+8. Frontend — Pages
+9. Frontend — Components
+10. Frontend — Hooks
+11. Frontend — Services
+12. Backend — Google Apps Script
+13. Google Sheets Data Structure
+14. API Contract
+15. Page Flow and Navigation
+16. Key Implementation Notes
+17. Use Case Flows
+18. Build Plan
 
 ---
 
@@ -366,6 +368,8 @@ export const dropdownConfig: DropdownLevel[] = [
 
 Google OAuth is handled entirely on the frontend using `@react-oauth/google`. GAS is not involved in authentication.
 
+### First visit / after logout
+
 ```
 1. User opens app
        ↓
@@ -373,15 +377,41 @@ Google OAuth is handled entirely on the frontend using `@react-oauth/google`. GA
        ↓ (no token)
 3. Redirect to LoginPage
        ↓
-4. User clicks "Sign in with Google"
+4. Google One Tap overlay appears — user selects their work account
        ↓
-5. Google OAuth popup — user selects account
+5. Google returns credential token to frontend
        ↓
-6. Google returns credential token to frontend
+6. Token decoded and user stored in AuthContext
        ↓
-7. Token stored in AuthContext
+7. User redirected to ScanPage (default post-login route)
+```
+
+### Page refresh (returning user)
+
+```
+1. User refreshes the page
        ↓
-8. User redirected to ScanPage (default post-login route)
+2. useGoogleOneTapLogin fires with auto_select: true
+       ↓
+3. Google detects active session and silently re-authenticates
+       ↓
+4. Token decoded and user restored in AuthContext
+       ↓
+5. User continues without seeing a login screen
+```
+
+### Logout
+
+```
+1. User clicks logout in Navbar
+       ↓
+2. googleLogout() is called — revokes One Tap session hint
+       ↓
+3. AuthContext is cleared
+       ↓
+4. User redirected to LoginPage
+       ↓
+5. On next visit, One Tap overlay is shown again (no silent re-auth)
 ```
 
 **AuthContext stores:**
@@ -391,7 +421,11 @@ Google OAuth is handled entirely on the frontend using `@react-oauth/google`. GA
 - `logout(): void`
 - `isAuthenticated: boolean`
 
-Token is stored in memory only (not localStorage) for security. User will need to re-authenticate on page refresh.
+**Key implementation notes:**
+
+- Token is stored in memory only (React state), not localStorage
+- `googleLogout()` from `@react-oauth/google` is called on logout to prevent One Tap from silently re-authenticating the user after an explicit logout
+- Calling `googleLogout()` only clears the One Tap session hint — it does not sign the user out of Google in the browser
 
 ---
 
@@ -785,7 +819,59 @@ The dropdown option values and their dependency mappings in `dropdownConfig.ts` 
 
 ---
 
-## 17. Build Plan
+## 17. Use Case Flows
+
+### UC-1: Staff — Scan & View a Device
+
+A staff member scans a QR code on a PC with their phone, gets redirected to the PC detail page, and views its current status and info.
+
+```
+Login → /scan → (scan QR) → /pc/:id (view details)
+```
+
+### UC-2: Staff — Update a Device (non-loan)
+
+Staff scans a PC, opens the update form, fills in the cascading dropdowns, and saves. The update is submitted directly to Google Sheets.
+
+```
+/pc/:id → /pc/:id/update → (save, classification ≠ loaned) → /pc/:id
+```
+
+### UC-3: Staff — Loan Out a Device
+
+Staff updates a PC with `classification = loaned`. This triggers the loan slip flow — a printable document is generated, the staff prints it, confirms, and only then is the update submitted to Sheets.
+
+```
+/pc/:id → /pc/:id/update → (save, classification = loaned) → /pc/:id/loan-slip → (print + confirm) → /pc/:id
+```
+
+### UC-4: Admin — Browse All Devices
+
+An admin views the full list of all PCs and can click into any device's detail page.
+
+```
+/admin/devices → (click a card) → /pc/:id
+```
+
+### UC-5: Admin — Generate QR Codes
+
+An admin visits the QR generator page, which renders a QR code for every PC (encoding its detail URL). These can be printed and physically attached to the machines.
+
+```
+/admin/qr → (print page)
+```
+
+### UC-6: Unauthenticated User
+
+Any user hitting a protected route without a token is redirected to login, then sent to the scan page on success.
+
+```
+(any protected route) → /login → (Google OAuth) → /scan
+```
+
+---
+
+## 18. Build Plan
 
 The application is built in 10 sequential phases. Each phase is reviewed and approved before the next begins.
 
