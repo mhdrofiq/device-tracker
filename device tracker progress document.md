@@ -1,0 +1,1 @@
+this document is to record all changes that are made to the system during development in chronological order so that it may be read by claude code as context.
